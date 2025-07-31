@@ -1,0 +1,45 @@
+version: "2"
+image_name: persai-llama-stack-test-configuration
+container_image: null
+
+apis:
+  - agents
+  - safety
+  - vector_io
+  - tool_runtime
+  - inference
+  - telemetry
+
+providers:
+  inference:
+    - provider_id: ollama
+      provider_type: remote::ollama
+      config:
+        url: http://localhost:11434
+  agents:
+    - provider_id: meta-reference
+      provider_type: inline::meta-reference
+      config:
+        persistence_store:
+          type: sqlite
+          db_path: ./data/test_agents_store.db
+        responses_store:
+          type: sqlite
+          db_path: ./data/test_responses_store.db
+  telemetry:
+    - provider_id: meta-reference
+      provider_type: inline::meta-reference
+      config:
+        sinks: ["console"]
+
+  tool_runtime:
+    []
+
+models:
+  - model_id: llama3.2:3b-instruct-fp16
+    provider_id: ollama
+    model_type: llm
+    provider_model_id: llama3.2:3b-instruct-fp16
+
+server:
+  port: 8322

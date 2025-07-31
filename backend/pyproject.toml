@@ -1,0 +1,33 @@
+[project]
+name = "persai"
+dynamic = ["version"]
+description = "Persai backend service"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.14",
+    "greenlet>=3.2.3",
+    "jinja2>=3.1.0",
+    "litellm>=1.73.6.post1",
+    "llama-stack>=0.2.14",
+    "loguru>=0.7.2",
+    "mcp>=1.10.1",
+    "sqlalchemy[asyncio]>=2.0.41",
+    "uvicorn>=0.35.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.4.0",
+    "pytest-asyncio>=0.23.8",
+    "httpx>=0.27.0",
+    "ollama>=0.4.0",
+    "greenlet>=3.0.0",
+]
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["persai*"]

@@ -1,0 +1,92 @@
+version: "2"
+image_name: persai-llama-stack-configuration
+container_image: null
+
+apis:
+  - agents
+  - safety
+  - vector_io
+  - tool_runtime
+  - inference
+  - telemetry
+
+providers:
+  inference:
+{% if env.OPENAI_API_KEY %}
+    - provider_id: openai
+      provider_type: remote::openai
+      config:
+        api_key: ${env.OPENAI_API_KEY}
+{% endif %}
+{% if env.GOOGLE_API_KEY %}
+    - provider_id: gemini
+      provider_type: remote::gemini
+      config:
+        api_key: ${env.GOOGLE_API_KEY}
+{% endif %}
+{% if env.ANTHROPIC_API_KEY %}
+    - provider_id: anthropic
+      provider_type: remote::anthropic
+      config:
+        api_key: ${env.ANTHROPIC_API_KEY}
+{% endif %}
+{% if not env.OPENAI_API_KEY and not env.GOOGLE_API_KEY and not env.ANTHROPIC_API_KEY %}
+    # No LLM providers configured. Please set one of:
+    # OPENAI_API_KEY, GOOGLE_API_KEY, or ANTHROPIC_API_KEY
+    []
+{% endif %}
+
+  agents:
+    - provider_id: meta-reference
+      provider_type: inline::meta-reference
+      config:
+        persistence_store:
+          type: sqlite
+          db_path: ./data/agents_store.db
+        responses_store:
+          type: sqlite
+          db_path: ./data/responses_store.db
+
+  telemetry:
+    - provider_id: meta-reference
+      provider_type: inline::meta-reference
+      config:
+        sinks: ["console"]
+
+  tool_runtime:
+    []
+
+models:
+{% if env.OPENAI_API_KEY %}
+  - model_id: gpt-4o-mini
+    provider_id: openai
+    model_type: llm
+    provider_model_id: gpt-4o-mini
+  - model_id: gpt-4o
+    provider_id: openai
+    model_type: llm
+    provider_model_id: gpt-4o
+{% endif %}
+{% if env.GOOGLE_API_KEY %}
+  - model_id: gemini-2.5-flash
+    provider_id: gemini
+    model_type: llm
+    provider_model_id: gemini/gemini-2.5-flash
+  - model_id: gemini-2.5-pro
+    provider_id: gemini
+    model_type: llm
+    provider_model_id: gemini/gemini-2.5-pro
+{% endif %}
+{% if env.ANTHROPIC_API_KEY %}
+  - model_id: claude-3-7-sonnet
+    provider_id: anthropic
+    model_type: llm
+    provider_model_id: anthropic/claude-3-7-sonnet-latest
+  - model_id: claude-3-5-haiku
+    provider_id: anthropic
+    model_type: llm
+    provider_model_id: anthropic/claude-3-5-haiku-latest
+{% endif %}
+
+server:
+  port: 8321
