@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from fastapi import Request
 from loguru import logger
 
-from .auth import AuthInfo, CookieAuthProvider
+from .auth import AuthInfo, CookieAuthProvider, is_auth_enabled, resolve_perses_url
 from persai.errors import CredentialsError
 from persai.agent import PrometheusClient
 
@@ -144,6 +144,25 @@ _token_validator = TokenValidator()
 def get_token_validator() -> TokenValidator:
     """Get the global token validator instance."""
     return _token_validator
+
+
+async def get_auth_info(request: Request) -> AuthInfo:
+    """
+    FastAPI dependency that returns AuthInfo.
+    When authentication is enabled, validates the session using refresh token.
+    When authentication is disabled, returns minimal AuthInfo with only perses_url.
+    """
+    if is_auth_enabled():
+        return await get_validated_auth_info(request)
+    else:
+        logger.info("Authentication disabled, returning minimal AuthInfo")
+        perses_url = resolve_perses_url(request)
+        return AuthInfo(
+            auth_token=None,
+            refresh_token=None,
+            perses_url=perses_url,
+            payload=None,
+        )
 
 
 async def get_validated_auth_info(request: Request) -> AuthInfo:

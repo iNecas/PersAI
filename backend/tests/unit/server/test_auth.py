@@ -8,6 +8,7 @@ from persai.server.auth import (
     parse_jwt_payload,
     AuthInfo,
     resolve_perses_url,
+    is_auth_enabled,
 )
 from persai.errors.exceptions import ConfigurationError, CredentialsError
 from fastapi import Request
@@ -250,3 +251,25 @@ async def test_get_auth_info_no_perses_url(jwt_cookie_parts, sample_jwt_header):
 
     with pytest.raises(ConfigurationError, match="Unable to construct Perses URL"):
         await provider.get_auth_info(request)
+
+
+def test_is_auth_enabled_default(monkeypatch):
+    """Test is_auth_enabled based on different env variables"""
+    # The default case
+    assert is_auth_enabled() is True
+
+    monkeypatch.setenv("PERSAI_AUTH", "true")
+    is_auth_enabled.cache_clear()
+    assert is_auth_enabled() is True
+
+    monkeypatch.setenv("PERSAI_AUTH", "false")
+    is_auth_enabled.cache_clear()
+    assert is_auth_enabled() is False
+
+    monkeypatch.setenv("PERSAI_AUTH", "FALSE")
+    is_auth_enabled.cache_clear()
+    assert is_auth_enabled() is False
+
+    monkeypatch.setenv("PERSAI_AUTH", "invalid")
+    is_auth_enabled.cache_clear()
+    assert is_auth_enabled() is True

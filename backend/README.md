@@ -52,6 +52,8 @@ Additional optional configuration options:
    If not provided, the first model with provided API KEY (based on ordering above)
    is used.
 - `PERSAI_SYSTEM_PROMPT` - Override the LLM system prompt
+- `PERSAI_AUTH` - Enable/disable authentication (default: "true")
+   Set to "false" to run without authentication
 - `PERSES_API_URL` - Base URL for Perses API (e.g., `http://perses.example.com`)
    If not provided, it uses the request headers and uses the origin of the request.
 - `LOG_LEVEL` - Logging level (default: INFO)

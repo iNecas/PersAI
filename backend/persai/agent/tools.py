@@ -41,6 +41,7 @@ class PrometheusClient:
         Ensure the auth token is valid, refreshing it if necessary.
         Returns updated AuthInfo if refresh occurred, None if no auth or refresh failed.
         """
+        # This can happen when PERSAI_AUTH=false
         if not self.auth_info or not self.auth_info.auth_token:
             return None
 

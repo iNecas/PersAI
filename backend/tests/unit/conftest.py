@@ -12,32 +12,51 @@ from persai.server.server import get_server
 from persai.server.token_validator import ValidationResult
 
 
-def create_test_jwt_cookies():
-    """Create valid JWT cookies for testing"""
-    # Create a token that expires in 2 hours
-    future_time = int(time.time()) + 7200
-    header = {"alg": "HS256", "typ": "JWT"}
-    payload = {"sub": "test-user", "exp": future_time}
+def create_test_jwt_cookies(auth_exp_offset=7200, refresh_exp_offset=10800, sub="test-user"):
+    """Create JWT cookies for testing with customizable expiration times
+    
+    Args:
+        auth_exp_offset: Seconds from now when auth token expires (positive=future, negative=past)
+        refresh_exp_offset: Seconds from now when refresh token expires (positive=future, negative=past)
+        sub: Subject (user ID) for the JWT tokens
+    """
+    current_time = int(time.time())
+    
+    # Create auth token payload
+    auth_payload = {"sub": sub, "exp": current_time + auth_exp_offset}
+    
+    # Create refresh token payload  
+    refresh_payload = {"sub": sub, "exp": current_time + refresh_exp_offset}
 
+    # Use the shared helper to create tokens
+    auth_token = create_test_jwt_token(auth_payload, "test-signature")
+    refresh_token = create_test_jwt_token(refresh_payload, "test-refresh-signature")
+    
+    # Split auth token for cookie format
+    auth_parts = auth_token.split(".")
+
+    return {
+        "jwtPayload": f"{auth_parts[0]}.{auth_parts[1]}",
+        "jwtSignature": auth_parts[2], 
+        "jwtRefreshToken": refresh_token,
+    }
+
+
+def create_test_jwt_token(payload, signature="test-signature"):
+    """Create a single JWT token for testing
+    
+    Args:
+        payload: The JWT payload dictionary
+        signature: The JWT signature string
+    """
+    header = {"alg": "HS256", "typ": "JWT"}
     header_encoded = (
         base64.urlsafe_b64encode(json.dumps(header).encode()).decode().rstrip("=")
     )
     payload_encoded = (
         base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
     )
-
-    # Create a proper refresh token JWT
-    refresh_payload = {"sub": "test-user", "exp": future_time + 3600}  # Refresh token expires later
-    refresh_payload_encoded = (
-        base64.urlsafe_b64encode(json.dumps(refresh_payload).encode()).decode().rstrip("=")
-    )
-    refresh_token = f"{header_encoded}.{refresh_payload_encoded}.test-refresh-signature"
-
-    return {
-        "jwtPayload": f"{header_encoded}.{payload_encoded}",
-        "jwtSignature": "test-signature",
-        "jwtRefreshToken": refresh_token,
-    }
+    return f"{header_encoded}.{payload_encoded}.{signature}"
 
 
 @pytest.fixture(autouse=True)
