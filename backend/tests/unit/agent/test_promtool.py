@@ -274,3 +274,23 @@ def test_ensure_valid_token_refresh_failure(mock_post):
     result = client.ensure_valid_token()
 
     assert result is None  # Refresh failed
+
+
+def test_get_prometheus_client_no_auth():
+    """Test get_prometheus_client factory function with no auth"""
+    ctx = ToolContext(
+        prometheus_url="http://prometheus:9090/api/v1",
+        auth=AuthInfo(
+            auth_token=None,
+            refresh_token=None,
+            perses_url="http://perses.example.com",
+            payload=None,
+        ),
+    )
+    tool_context.set(ctx)
+
+    client = get_prometheus_client()
+    assert isinstance(client, PrometheusClient)
+    assert client.base_url == "http://prometheus:9090/api/v1"
+    assert "Authorization" not in client._get_headers()
+    assert client.auth_info.auth_token is None

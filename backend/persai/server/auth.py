@@ -2,6 +2,7 @@ import json
 import base64
 import os
 import time
+from functools import cache
 from dataclasses import dataclass
 from fastapi import Request
 from typing import Optional, Dict, Any
@@ -10,14 +11,24 @@ from loguru import logger
 from persai.errors import ConfigurationError, CredentialsError
 
 
+@cache
+def is_auth_enabled() -> bool:
+    """
+    Check if authentication is enabled via PERSAI_AUTH environment variable.
+    Defaults to True if not set or invalid value.
+    """
+    auth_setting = os.getenv("PERSAI_AUTH", "true").lower()
+    return auth_setting != "false"
+
+
 @dataclass
 class AuthInfo:
     """Encapsulates authentication information for API requests."""
 
-    auth_token: str
+    auth_token: Optional[str]
     refresh_token: Optional[str]
     perses_url: str
-    payload: Dict
+    payload: Optional[Dict]
 
     def auth_token_should_refresh(self, threshold_seconds: int = 60) -> bool:
         """
@@ -26,7 +37,7 @@ class AuthInfo:
         :param threshold_seconds: Seconds before expiration to consider token as needing refresh
         :returns: True if token is expired or within threshold of expiration
         """
-        if "exp" not in self.payload:
+        if not self.payload or "exp" not in self.payload:
             return True  # Consider invalid tokens as expired
 
         current_time = int(time.time())

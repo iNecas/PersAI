@@ -49,9 +49,16 @@ providing JWT tokens for the authorization:
 - at the beginning of the request, it verified validity of the token by trying
   to use the refresh token to issue a new token: if it succeeds, the token is
   trusted (cached for an hour before re-validation).
-  
+
 - the tokens are also used in during the tool calls to authenticate against
   Perses data-source proxy again as the same user.
+  
+When running Perses with `enable_auth: false`, you can disable the auth logic with
+
+```bash
+export PERSAI_AUTH=false
+```
+                           
 
 ### AI Agent Framework
 

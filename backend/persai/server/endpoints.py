@@ -10,7 +10,7 @@ from loguru import logger
 
 from persai.agent import get_agent, get_async_client
 from persai.agent import tool_context, ToolContext
-from .token_validator import get_validated_auth_info
+from .token_validator import get_auth_info
 
 router = APIRouter(tags=["streaming_query"])
 
@@ -88,7 +88,7 @@ async def session_turn_create(
     session_id: str,
     body: dict,
     datasource_path: str,
-    auth_info=Depends(get_validated_auth_info),
+    auth_info=Depends(get_auth_info),
 ) -> StreamingResponse:
     """Creates a new turn (message) within a specific agent session."""
     message = body.get("message", "")

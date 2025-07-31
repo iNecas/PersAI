@@ -1,12 +1,16 @@
 import time
-import json
-import base64
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 import pytest
 
-from persai.server.token_validator import TokenValidator, ValidationResult
+from persai.server.token_validator import (
+    TokenValidator,
+    ValidationResult,
+    get_auth_info,
+    get_validated_auth_info,
+)
 from persai.server.auth import AuthInfo
 from persai.errors.exceptions import CredentialsError
+from ..conftest import create_test_jwt_cookies, create_test_jwt_token
 
 
 class TestTokenValidator:
@@ -15,20 +19,22 @@ class TestTokenValidator:
     def setup_method(self):
         """Set up test fixtures."""
         self.validator = TokenValidator()
-        
+
         # Create a mock AuthInfo
         self.mock_payload = {
             "sub": "test-user",
             "exp": int(time.time()) + 3600,  # 1 hour from now
         }
-        
+
         # Create a mock refresh token
         refresh_payload = {
-            "sub": "test-user", 
+            "sub": "test-user",
             "exp": int(time.time()) + 7200,  # 2 hours from now
         }
-        self.mock_refresh_token = self._create_mock_jwt(refresh_payload)
-        
+        self.mock_refresh_token = create_test_jwt_token(
+            refresh_payload, "mock_signature"
+        )
+
         self.mock_auth_info = AuthInfo(
             auth_token="mock.jwt.token",
             refresh_token=self.mock_refresh_token,
@@ -36,28 +42,19 @@ class TestTokenValidator:
             payload=self.mock_payload,
         )
 
-    def _create_mock_jwt(self, payload):
-        """Create a mock JWT token for testing."""
-        header = {"alg": "HS256", "typ": "JWT"}
-        header_b64 = base64.urlsafe_b64encode(json.dumps(header).encode()).decode().rstrip("=")
-        payload_b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
-        signature = "mock_signature"
-        return f"{header_b64}.{payload_b64}.{signature}"
-
     def test_get_refresh_token_cache_key(self):
         """Test cache key generation from refresh token."""
         cache_key = self.validator._get_refresh_token_cache_key("test_token")
         assert isinstance(cache_key, str)
         assert len(cache_key) == 64  # SHA256 hex digest length
-        
+
         # Same token should produce same key
         cache_key2 = self.validator._get_refresh_token_cache_key("test_token")
         assert cache_key == cache_key2
-        
+
         # Different tokens should produce different keys
         cache_key3 = self.validator._get_refresh_token_cache_key("different_token")
         assert cache_key != cache_key3
-
 
     def test_is_cache_valid_no_cache(self):
         """Test cache validity when no cache entry exists."""
@@ -68,43 +65,42 @@ class TestTokenValidator:
     def test_is_cache_valid_expired_validation(self):
         """Test cache validity when validation has expired."""
         cache_key = "test_key"
-        
+
         # Create an expired cache entry (older than 3600 seconds)
         self.validator._validation_cache[cache_key] = ValidationResult(
-            is_valid=True,
-            validated_at=time.time() - 4000  # Over 1 hour ago
+            is_valid=True, validated_at=time.time() - 4000  # Over 1 hour ago
         )
-        
+
         result = self.validator._is_cache_valid(cache_key)
         assert result is False
 
     def test_is_cache_valid_within_duration(self):
         """Test cache validity when within cache duration."""
         cache_key = "test_key"
-        
+
         # Create a recent cache entry
         self.validator._validation_cache[cache_key] = ValidationResult(
-            is_valid=True,
-            validated_at=time.time() - 60  # 1 minute ago
+            is_valid=True, validated_at=time.time() - 60  # 1 minute ago
         )
-        
+
         result = self.validator._is_cache_valid(cache_key)
         assert result is True
 
-    @patch('persai.agent.tools.PrometheusClient._refresh_token')
+    @patch("persai.agent.tools.PrometheusClient._refresh_token")
     def test_validate_via_refresh_success(self, mock_refresh_token):
         """Test successful validation via refresh."""
         # Mock successful refresh token call
+        new_payload = {"sub": "test-user", "exp": int(time.time()) + 3600}
         mock_updated_auth = AuthInfo(
-            auth_token=self._create_mock_jwt({"sub": "test-user", "exp": int(time.time()) + 3600}),
+            auth_token=create_test_jwt_token(new_payload),
             refresh_token=self.mock_refresh_token,
             perses_url="https://perses.example.com",
-            payload={"sub": "test-user", "exp": int(time.time()) + 3600}
+            payload=new_payload,
         )
         mock_refresh_token.return_value = mock_updated_auth
 
         result = self.validator._validate_via_refresh(self.mock_auth_info)
-        
+
         assert result.is_valid is True
         assert result.error is None
         assert result.validated_at is not None
@@ -113,14 +109,14 @@ class TestTokenValidator:
         # Verify the refresh method was called
         mock_refresh_token.assert_called_once()
 
-    @patch('persai.agent.tools.PrometheusClient._refresh_token')
+    @patch("persai.agent.tools.PrometheusClient._refresh_token")
     def test_validate_via_refresh_failure(self, mock_refresh_token):
         """Test failed validation via refresh."""
         # Mock the _refresh_token method to raise an exception (simulating failure)
         mock_refresh_token.side_effect = Exception("Refresh failed with status 401")
 
         result = self.validator._validate_via_refresh(self.mock_auth_info)
-        
+
         assert result.is_valid is False
         assert result.error is not None
         assert "Refresh failed with status 401" in result.error
@@ -131,51 +127,48 @@ class TestTokenValidator:
             auth_token="mock.jwt.token",
             refresh_token=None,
             perses_url="https://perses.example.com",
-            payload=self.mock_payload
+            payload=self.mock_payload,
         )
 
         result = self.validator._validate_via_refresh(auth_info_no_refresh)
-        
+
         assert result.is_valid is False
         assert "No refresh token" in result.error
 
-    @patch('persai.agent.tools.PrometheusClient._refresh_token')
+    @patch("persai.agent.tools.PrometheusClient._refresh_token")
     def test_validate_via_refresh_exception(self, mock_refresh_token):
         """Test validation when request raises exception."""
         mock_refresh_token.side_effect = Exception("Network error")
 
         result = self.validator._validate_via_refresh(self.mock_auth_info)
-        
+
         assert result.is_valid is False
         assert "Network error" in result.error
 
-    @patch.object(TokenValidator, '_validate_via_refresh')
+    @patch.object(TokenValidator, "_validate_via_refresh")
     def test_validate_auth_info_cache_hit(self, mock_validate):
         """Test validation with cache hit."""
         # Pre-populate cache
         cache_key = self.validator._get_refresh_token_cache_key(self.mock_refresh_token)
-        cached_result = ValidationResult(
-            is_valid=True,
-            validated_at=time.time() - 60
-        )
+        cached_result = ValidationResult(is_valid=True, validated_at=time.time() - 60)
         self.validator._validation_cache[cache_key] = cached_result
 
         result = self.validator.validate_auth_info(self.mock_auth_info)
-        
+
         assert result == cached_result
         mock_validate.assert_not_called()
 
-    @patch.object(TokenValidator, '_validate_via_refresh')
+    @patch.object(TokenValidator, "_validate_via_refresh")
     def test_validate_auth_info_cache_miss(self, mock_validate):
         """Test validation with cache miss."""
         mock_result = ValidationResult(is_valid=True, validated_at=time.time())
         mock_validate.return_value = mock_result
 
         result = self.validator.validate_auth_info(self.mock_auth_info)
-        
+
         assert result == mock_result
         mock_validate.assert_called_once_with(self.mock_auth_info)
-        
+
         # Check that result was cached
         cache_key = self.validator._get_refresh_token_cache_key(self.mock_refresh_token)
         assert cache_key in self.validator._validation_cache
@@ -187,25 +180,29 @@ class TestTokenValidator:
             auth_token="mock.jwt.token",
             refresh_token=None,
             perses_url="https://perses.example.com",
-            payload=self.mock_payload
+            payload=self.mock_payload,
         )
 
         result = self.validator.validate_auth_info(auth_info_no_refresh)
-        
+
         assert result.is_valid is False
         assert "No refresh token" in result.error
 
     def test_cleanup_expired_cache(self):
         """Test cleanup of expired cache entries."""
         # Add some entries - one old, one recent
-        old_result = ValidationResult(is_valid=True, validated_at=time.time() - 4000)  # Old
-        recent_result = ValidationResult(is_valid=True, validated_at=time.time() - 60)  # Recent
-        
+        old_result = ValidationResult(
+            is_valid=True, validated_at=time.time() - 4000
+        )  # Old
+        recent_result = ValidationResult(
+            is_valid=True, validated_at=time.time() - 60
+        )  # Recent
+
         self.validator._validation_cache["old_key"] = old_result
         self.validator._validation_cache["recent_key"] = recent_result
-        
+
         self.validator._cleanup_expired_cache()
-        
+
         # Old entry should be removed, recent should remain
         assert "old_key" not in self.validator._validation_cache
         assert "recent_key" in self.validator._validation_cache
@@ -226,9 +223,111 @@ class TestValidationResult:
         """Test ValidationResult with error information."""
         error_msg = "Token expired"
         result = ValidationResult(
-            is_valid=False, 
-            validated_at=time.time(), 
-            error=error_msg
+            is_valid=False, validated_at=time.time(), error=error_msg
         )
         assert result.is_valid is False
         assert result.error == error_msg
+
+
+class TestGetAuthInfo:
+    """Test cases for get_auth_info dependency function."""
+
+    @pytest.mark.asyncio
+    @patch("persai.server.token_validator.is_auth_enabled")
+    async def test_get_auth_info_auth_disabled(self, mock_is_auth_enabled, monkeypatch):
+        """Test get_auth_info when authentication is disabled."""
+        mock_is_auth_enabled.return_value = False
+        monkeypatch.setenv("PERSES_API_URL", "http://perses.example.com")
+
+        request = Mock()
+        request.headers = {}
+
+        auth_info = await get_auth_info(request)
+
+        assert auth_info.auth_token is None
+        assert auth_info.refresh_token is None
+        assert auth_info.perses_url == "http://perses.example.com"
+        assert auth_info.payload is None
+
+    @pytest.mark.asyncio
+    @patch("persai.server.token_validator.is_auth_enabled")
+    @patch("persai.server.token_validator.get_validated_auth_info")
+    async def test_get_auth_info_auth_enabled(
+        self, mock_get_validated_auth_info, mock_is_auth_enabled
+    ):
+        """Test get_auth_info calls get_validated_auth_info when authentication is enabled."""
+        mock_is_auth_enabled.return_value = True
+
+        request = Mock()
+        await get_auth_info(request)
+
+        mock_get_validated_auth_info.assert_called_once_with(request)
+
+
+class TestGetValidatedAuthInfo:
+    """Test cases for get_validated_auth_info function."""
+
+    @pytest.mark.asyncio
+    @patch("requests.post")  # Mock the HTTP call for token refresh
+    async def test_get_validated_auth_info_success(self, mock_post, monkeypatch):
+        """Test get_validated_auth_info with successful validation using real TokenValidator."""
+        monkeypatch.setenv("PERSES_API_URL", "http://perses.example.com")
+
+        # Use the parameterized test JWT cookies helper
+        cookies = create_test_jwt_cookies()
+
+        # Mock request with valid cookies
+        request = Mock()
+        request.cookies = cookies
+        request.headers = {}
+
+        # Mock successful refresh response (in case validation needs it)
+        new_auth_payload = {"sub": "test-user", "exp": int(time.time()) + 3600}
+        new_auth_token = create_test_jwt_token(new_auth_payload, "new_signature")
+
+        mock_post.return_value.json.return_value = {
+            "access_token": new_auth_token,
+            "refresh_token": cookies["jwtRefreshToken"],
+        }
+        mock_post.return_value.raise_for_status.return_value = None
+
+        result = await get_validated_auth_info(request)
+
+        assert result is not None
+        assert result.auth_token == f"{cookies['jwtPayload']}.{cookies['jwtSignature']}"
+        assert result.refresh_token == cookies["jwtRefreshToken"]
+        assert result.perses_url == "http://perses.example.com"
+        assert result.payload is not None
+        assert result.payload["sub"] == "test-user"
+
+    @pytest.mark.asyncio
+    @patch(
+        "persai.server.token_validator.get_token_validator"
+    )  # Mock the validator to ensure fresh instance
+    @patch("requests.post")  # Mock the HTTP call for token refresh
+    async def test_get_validated_auth_info_failure(
+        self, mock_post, mock_get_validator, monkeypatch
+    ):
+        """Test get_validated_auth_info with failed validation using real TokenValidator."""
+        monkeypatch.setenv("PERSES_API_URL", "http://perses.example.com")
+
+        # Create a fresh TokenValidator instance for this test
+        fresh_validator = TokenValidator()
+        mock_get_validator.return_value = fresh_validator
+
+        # Use parameterized helper to create expired auth token with valid refresh token
+        cookies = create_test_jwt_cookies(
+            auth_exp_offset=-3600,  # Auth token expired 1 hour ago
+            refresh_exp_offset=7200,  # Refresh token valid for 2 hours
+        )
+
+        # Mock request with cookies containing expired auth token
+        request = Mock()
+        request.cookies = cookies
+        request.headers = {}
+
+        # Mock failed refresh response (e.g., 401 Unauthorized)
+        mock_post.side_effect = Exception("401 Unauthorized")
+
+        with pytest.raises(CredentialsError, match="Token validation failed"):
+            await get_validated_auth_info(request)
