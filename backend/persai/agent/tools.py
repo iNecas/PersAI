@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 from contextvars import ContextVar
 import time
+from datetime import datetime, timedelta
 
 import dotenv
 import requests
@@ -9,7 +10,7 @@ from loguru import logger
 
 from llama_stack_client.lib.agents.client_tool import client_tool
 from persai.server.auth import AuthInfo, parse_jwt_payload
-from persai.errors import PrometheusError, ConfigurationError, CredentialsError
+from persai.errors import PrometheusError, ConfigurationError
 
 dotenv.load_dotenv()
 
@@ -192,20 +193,36 @@ async def list_metrics() -> List[str]:
     return get_prometheus_client().list_metrics()
 
 
-@client_tool
-async def execute_range_query(
-    query: str, start: str, end: str, step: str
+async def _execute_range_query(
+    query: str,
+    step: str,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    duration: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Execute a PromQL range query with start time, end time, and step interval
+    """Execute a PromQL range query with flexible time specification.
 
-    :param query: PromQL query string
-    :param start: Start time as RFC3339 or Unix timestamp
-    :param end: End time as RFC3339 or Unix timestamp
-    :param step: Query resolution step width (e.g., '15s', '1m', '1h')
-
-    :returns: Range query result with type (usually matrix) and values over time
+    see `execute_range_query` for docs.
     """
-    with logger.contextualize(query=query, start=start, end=end, step=step):
+    if start and end and duration:
+        raise ValueError("Cannot specify both start/end and duration parameters")
+
+    if not start and not end and not duration:
+        duration = "1h"
+
+    if (start and not end) or (end and not start):
+        raise ValueError("Both start and end must be provided together")
+
+    if duration:
+        end_time = datetime.now()
+        start_time = end_time - _parse_duration(duration)
+
+        start = start_time.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        end = end_time.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+    with logger.contextualize(
+        query=query, start=start, end=end, step=step, duration=duration
+    ):
         logger.info("Executing range query")
 
         result = get_prometheus_client().execute_range_query(query, start, end, step)
@@ -217,6 +234,60 @@ async def execute_range_query(
         )
 
         return result
+
+
+@client_tool
+async def execute_range_query(
+    query: str,
+    step: str,
+    # not using Optional, as some LLM providers can't handle it (seen it with Gemini).
+    start: str = None,  # pyright: ignore[reportArgumentType]
+    end: str = None,  # pyright: ignore[reportArgumentType]
+    duration: str = None,  # pyright: ignore[reportArgumentType]
+) -> Dict[str, Any]:
+    """Execute a PromQL range query with flexible time specification.
+
+    For current/recent data queries, use the 'duration' parameter to specify how far back
+    to look from now (e.g., '1h' for last hour, '30m' for last 30 minutes).
+
+    For historical data queries, use explicit 'start' and 'end' times.
+
+    :param query: PromQL query string
+    :param step: Query resolution step width (e.g., '15s', '1m', '1h')
+    :param start: Start time as RFC3339 or Unix timestamp (optional)
+    :param end: End time as RFC3339 or Unix timestamp (optional)
+    :param duration: Duration to look back from now (e.g., '1h', '30m', '1d', '2w') (optional)
+
+    :returns: Range query result with type (usually matrix) and values over time
+
+    Note: Either provide both 'start' and 'end', or provide 'duration'.
+    If 'duration' is provided, it will query from (now - duration) to now.
+    If neither is provided, defaults to last 1 hour.
+    """
+    # Need to wrap the function, as llamastack client tool
+    # is not callable: `TypeError: '_WrappedTool' object is not callable`.
+    # Might be worth fixing upstream.
+    return await _execute_range_query(query, step, start, end, duration)
+
+
+def _parse_duration(duration: str) -> timedelta:
+    """Parse a duration string like '1h', '30m', '1d' into a timedelta object."""
+    duration = duration.strip().lower()
+
+    if duration.endswith("s"):
+        return timedelta(seconds=int(duration[:-1]))
+    elif duration.endswith("m"):
+        return timedelta(minutes=int(duration[:-1]))
+    elif duration.endswith("h"):
+        return timedelta(hours=int(duration[:-1]))
+    elif duration.endswith("d"):
+        return timedelta(days=int(duration[:-1]))
+    elif duration.endswith("w"):
+        return timedelta(weeks=int(duration[:-1]))
+    else:
+        raise ValueError(
+            f"Invalid duration format: {duration}. Use formats like '1h', '30m', '1d'"
+        )
 
 
 promtools = [list_metrics, execute_range_query]
