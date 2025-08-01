@@ -73,7 +73,9 @@ def get_server():
 
             return response
 
-    cors_origins = os.getenv("PERSAI_CORS_ORIGINS", "http://localhost:3000")
+    cors_origins = os.getenv("PERSAI_CORS_ORIGINS")
+    if cors_origins is None:
+        cors_origins = os.getenv("PERSES_API_URL", "http://localhost:3000")
 
     # Only add CORS middleware if origins are non-empty
     if cors_origins.strip():

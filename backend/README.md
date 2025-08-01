@@ -23,6 +23,13 @@ export PERSAI_DEFAULT_MODEL="gpt-4o-mini"
 uv run uvicorn main:app
 ```
 
+By default, the backend assumes dev instance of Perses running on `http://localhost:3000`.
+When accessing Perses UI from different URL, provide CORS settings accordingly:
+
+``` bash
+export PERSAI_CORS_ORIGINS="http://perses.example.com"
+```
+
 ### Development mode
 
 ```bash
@@ -48,14 +55,16 @@ Configure LLM providers by setting the appropriate API keys:
 
 Additional optional configuration options:
 
-- `PERSAI_DEFAULT_MODEL` - Override default model selection
+- `PERSAI_DEFAULT_MODEL` - Override default model selection. <br/>
    If not provided, the first model with provided API KEY (based on ordering above)
    is used.
-- `PERSAI_SYSTEM_PROMPT` - Override the LLM system prompt
-- `PERSAI_AUTH` - Enable/disable authentication (default: "true")
+- `PERSAI_SYSTEM_PROMPT` - Override the LLM system prompt. <br/>
+- `PERSAI_AUTH` - Enable/disable authentication (default: "true") <br/>
    Set to "false" to run without authentication
-- `PERSES_API_URL` - Base URL for Perses API (e.g., `http://perses.example.com`)
+- `PERSES_API_URL` - Base URL for Perses API (e.g., `http://perses.example.com`). <br/>
    If not provided, it uses the request headers and uses the origin of the request.
+- `PERSAI_CORS_ORIGINS` - Comma-separated list of urls to accept CORS requests from. <br/>
+   By default uses `PERSES_API_URL` if provided, `http://localhost:3000` otherwise.
 - `LOG_LEVEL` - Logging level (default: INFO)
 
 ## Development
