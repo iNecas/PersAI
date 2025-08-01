@@ -263,7 +263,7 @@ export function ToolCall({ toolCall, datasource }: ToolCallProps) {
           end: new Date(end),
         } as AbsoluteTimeRange;
       } else {
-        timeRange = { pastDuration: "1h" } as RelativeTimeRange;
+        timeRange = { pastDuration: duration || "1h" } as RelativeTimeRange;
       }
 
       return (

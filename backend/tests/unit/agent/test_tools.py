@@ -3,11 +3,14 @@ import json
 import base64
 import pytest
 from unittest.mock import patch, MagicMock
+from datetime import datetime, timedelta
 from persai.agent.tools import (
     tool_context,
     ToolContext,
     PrometheusClient,
     get_prometheus_client,
+    _execute_range_query,
+    _parse_duration,
 )
 from persai.server.auth import AuthInfo
 from persai.errors.exceptions import PrometheusError, ConfigurationError
@@ -68,6 +71,58 @@ def client():
 def client_no_auth():
     """PrometheusClient instance without auth for testing"""
     return PrometheusClient("http://prometheus:9090/api/v1")
+
+
+@pytest.fixture
+def mocked_range_query_result():
+    """Common expected result structure for matrix queries"""
+    return {"resultType": "matrix", "result": [{"metric": {}, "values": []}]}
+
+
+@pytest.fixture
+def mock_prometheus_client(mocked_range_query_result):
+    """Mock PrometheusClient for testing tool functions with patching"""
+    mock_client = MagicMock()
+    mock_client.execute_range_query.return_value = mocked_range_query_result
+    with patch("persai.agent.tools.get_prometheus_client") as mock_get_client:
+        mock_get_client.return_value = mock_client
+        yield mock_client
+
+
+@pytest.fixture
+def tool_context_with_auth():
+    """ToolContext with authentication for testing"""
+    ctx = ToolContext(
+        prometheus_url="http://prometheus:9090/api/v1",
+        auth=create_auth_info(),
+    )
+    tool_context.set(ctx)
+    return ctx
+
+
+@pytest.fixture
+def tool_context_no_auth():
+    """ToolContext without authentication for testing"""
+    ctx = ToolContext(
+        prometheus_url="http://prometheus:9090/api/v1",
+        auth=AuthInfo(
+            auth_token=None,
+            refresh_token=None,
+            perses_url="http://perses.example.com",
+            payload=None,
+        ),
+    )
+    tool_context.set(ctx)
+    return ctx
+
+
+@pytest.fixture
+def fixed_datetime():
+    """Fixed datetime for testing duration calculations"""
+    with patch("persai.agent.tools.datetime") as mock_datetime:
+        mock_datetime.now.return_value = datetime(2024, 1, 1, 12, 0, 0)
+        mock_datetime.strftime = datetime.strftime
+        yield
 
 
 def test_client_initialization():
@@ -182,20 +237,16 @@ def test_prometheus_api_error(client):
             client.list_metrics()
 
 
-def test_get_prometheus_client_factory():
+def test_get_prometheus_client_factory(tool_context_with_auth):
     """Test get_prometheus_client factory function"""
-    auth_info = create_auth_info()
-    ctx = ToolContext(
-        prometheus_url="http://prometheus:9090/api/v1",
-        auth=auth_info,
-    )
-    tool_context.set(ctx)
-
     client = get_prometheus_client()
     assert isinstance(client, PrometheusClient)
     assert client.base_url == "http://prometheus:9090/api/v1"
-    assert client._get_headers()["Authorization"] == f"Bearer {auth_info.auth_token}"
-    assert client.auth_info == auth_info
+    assert (
+        client._get_headers()["Authorization"]
+        == f"Bearer {tool_context_with_auth.auth.auth_token}"
+    )
+    assert client.auth_info == tool_context_with_auth.auth
 
 
 def test_get_prometheus_client_no_context():
@@ -276,21 +327,121 @@ def test_ensure_valid_token_refresh_failure(mock_post):
     assert result is None  # Refresh failed
 
 
-def test_get_prometheus_client_no_auth():
+def test_get_prometheus_client_no_auth(tool_context_no_auth):
     """Test get_prometheus_client factory function with no auth"""
-    ctx = ToolContext(
-        prometheus_url="http://prometheus:9090/api/v1",
-        auth=AuthInfo(
-            auth_token=None,
-            refresh_token=None,
-            perses_url="http://perses.example.com",
-            payload=None,
-        ),
-    )
-    tool_context.set(ctx)
-
     client = get_prometheus_client()
     assert isinstance(client, PrometheusClient)
     assert client.base_url == "http://prometheus:9090/api/v1"
     assert "Authorization" not in client._get_headers()
     assert client.auth_info.auth_token is None
+
+
+def test_parse_duration():
+    """Test _parse_duration helper function"""
+    assert _parse_duration("30s") == timedelta(seconds=30)
+    assert _parse_duration("5m") == timedelta(minutes=5)
+    assert _parse_duration("2h") == timedelta(hours=2)
+    assert _parse_duration("1d") == timedelta(days=1)
+    assert _parse_duration("1w") == timedelta(weeks=1)
+
+    # Test case insensitive
+    assert _parse_duration("30S") == timedelta(seconds=30)
+    assert _parse_duration("5M") == timedelta(minutes=5)
+
+    # Test with whitespace
+    assert _parse_duration(" 30s ") == timedelta(seconds=30)
+
+    # Test invalid format
+    with pytest.raises(ValueError, match="Invalid duration format"):
+        _parse_duration("30x")
+
+
+@pytest.mark.asyncio
+async def test_execute_range_query_with_duration(
+    mock_prometheus_client,
+    tool_context_with_auth,
+    fixed_datetime,
+    mocked_range_query_result,
+):
+    """Test execute_range_query with duration parameter"""
+    result = await _execute_range_query("up", "1m", duration="1h")
+
+    assert result == mocked_range_query_result
+
+    # Verify that the client was called with calculated start/end times
+    mock_prometheus_client.execute_range_query.assert_called_once()
+    args = mock_prometheus_client.execute_range_query.call_args[0]
+    query, start, end, step = args
+
+    assert query == "up"
+    assert step == "1m"
+    # Start should be 1 hour before the fixed time
+    assert start == "2024-01-01T11:00:00.000000Z"
+    assert end == "2024-01-01T12:00:00.000000Z"
+
+
+@pytest.mark.asyncio
+async def test_execute_range_query_with_start_end(
+    mock_prometheus_client, tool_context_with_auth, mocked_range_query_result
+):
+    """Test execute_range_query with explicit start/end parameters"""
+    result = await _execute_range_query(
+        "up", "1m", start="2024-01-01T00:00:00Z", end="2024-01-01T01:00:00Z"
+    )
+
+    assert result == mocked_range_query_result
+
+    # Verify that the client was called with provided start/end times
+    mock_prometheus_client.execute_range_query.assert_called_once_with(
+        "up", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z", "1m"
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_range_query_default_duration(
+    mock_prometheus_client, tool_context_with_auth, fixed_datetime
+):
+    """Test execute_range_query defaults to 1h when no time params provided"""
+    # Override the default return value for this test
+    mock_prometheus_client.execute_range_query.return_value = {
+        "resultType": "matrix",
+        "result": [],
+    }
+
+    await _execute_range_query("up", "1m")
+
+    # Verify that the client was called with 1h duration (default)
+    mock_prometheus_client.execute_range_query.assert_called_once()
+    args = mock_prometheus_client.execute_range_query.call_args[0]
+    query, start, end, step = args
+
+    assert query == "up"
+    assert step == "1m"
+    # Should default to 1h duration
+    assert start == "2024-01-01T11:00:00.000000Z"
+    assert end == "2024-01-01T12:00:00.000000Z"
+
+
+@pytest.mark.asyncio
+async def test_execute_range_query_validation_errors(tool_context_with_auth):
+    """Test execute_range_query parameter validation"""
+    # Test: Cannot provide both start/end and duration
+    with pytest.raises(ValueError, match="Cannot specify both start/end and duration"):
+        await _execute_range_query(
+            "up",
+            "1m",
+            start="2024-01-01T00:00:00Z",
+            end="2024-01-01T01:00:00Z",
+            duration="1h",
+        )
+
+    # Test: Must provide both start and end together
+    with pytest.raises(
+        ValueError, match="Both start and end must be provided together"
+    ):
+        await _execute_range_query("up", "1m", start="2024-01-01T00:00:00Z")
+
+    with pytest.raises(
+        ValueError, match="Both start and end must be provided together"
+    ):
+        await _execute_range_query("up", "1m", end="2024-01-01T01:00:00Z")
