@@ -228,9 +228,13 @@ export function PersaiExplorer(): ReactElement {
       );
 
       for await (const chunk of response) {
-        setMessages((prevMessages) =>
-          updateMessagesFromChunk(prevMessages, chunk),
-        );
+        if ((chunk as any).error) {
+          // Propagate inference errors.
+          throw new Error((chunk as any).error.message);
+        }
+        setMessages((prevMessages) => {
+          return updateMessagesFromChunk(prevMessages, chunk);
+        });
       }
       setIsStreaming(false);
     } catch (error) {

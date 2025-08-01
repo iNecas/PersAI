@@ -134,13 +134,9 @@ class PrometheusClient:
                     response_size=len(response.content),
                 )
 
-                response.raise_for_status()
-                result = response.json()
+                self._raise_for_status(response)
 
-                if result["status"] != "success":
-                    raise PrometheusError(
-                        f"Prometheus API error: {result.get('error', 'Unknown error')}"
-                    )
+                result = response.json()
 
                 return result["data"]
             except Exception as e:
@@ -149,6 +145,7 @@ class PrometheusClient:
                     "Prometheus request failed",
                     duration_ms=round(duration_ms, 2),
                     error_type=type(e).__name__,
+                    error=str(e),
                 )
                 raise
 
@@ -159,6 +156,22 @@ class PrometheusClient:
     def _post(self, endpoint: str, data: dict, headers: Optional[dict] = None) -> dict:
         """Internal POST request method"""
         return self._request("POST", endpoint, data=data, headers=headers)
+
+    def _raise_for_status(self, response):
+        """Raise HTTPError based on response status
+
+        Enhanced version over `requests` to include response from the server: can be used
+        by LLM to tweak the response"""
+
+        if 400 <= response.status_code:
+            http_error_msg = f"{response.status_code} Error: {response.reason}"
+
+            if response.content:
+                http_error_msg += "\n" + str(response.content)
+
+            raise requests.HTTPError(http_error_msg, response=response)
+
+        response.raise_for_status()
 
     def list_metrics(self) -> List[str]:
         """List all available metrics in Prometheus"""
