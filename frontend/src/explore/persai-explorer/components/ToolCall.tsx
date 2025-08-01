@@ -50,8 +50,10 @@ const PANEL_PREVIEW_HEIGHT = 300;
  */
 export function GenericToolCall({
   toolCall,
+  error = false,
 }: {
   toolCall: ToolCallType;
+  error?: boolean;
 }): ReactElement {
   const [expanded, setExpanded] = useState(false);
 
@@ -64,9 +66,12 @@ export function GenericToolCall({
       sx={{
         mt: 1,
         border: "1px solid",
-        borderColor: "divider",
+        borderColor: error ? "error.dark" : "divider",
         borderRadius: 1,
-        backgroundColor: "grey.100",
+        backgroundColor: error ? "error.dark" : "grey.100",
+        ...(error && {
+          backgroundColor: "rgba(211, 47, 47, 0.08)",
+        }),
       }}
     >
       <Box
@@ -84,7 +89,7 @@ export function GenericToolCall({
         onClick={handleExpandClick}
       >
         <Typography variant="caption" color="text.secondary" component="div">
-          Tool: {toolCall.toolName}
+          Tool: {toolCall.toolName} {error ? "(failed)" : ""}
         </Typography>
         <IconButton
           size="small"
@@ -253,9 +258,15 @@ export function TimeSeriesTool(props: TimeSeriesToolProps): ReactElement {
  * Routes to specialized components for known tools or falls back to generic display.
  */
 export function ToolCall({ toolCall, datasource }: ToolCallProps) {
+  // TODO: The message comes directly from llamastack python client and might be fragile.
+  // Look into improving llamastack to better report on tool calls failures.
+  if (toolCall.result?.startsWith("Error when running tool")) {
+    return <GenericToolCall toolCall={toolCall} error={true} />;
+  }
+
   switch (toolCall.toolName) {
     case "execute_range_query":
-      const { query, start, end } = toolCall.args;
+      const { query, start, end, duration } = toolCall.args;
       let timeRange: TimeRangeValue;
       if (start && end) {
         timeRange = {

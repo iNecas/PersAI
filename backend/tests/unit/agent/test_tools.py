@@ -4,6 +4,9 @@ import base64
 import pytest
 from unittest.mock import patch, MagicMock
 from datetime import datetime, timedelta
+
+from requests import HTTPError
+
 from persai.agent.tools import (
     tool_context,
     ToolContext,
@@ -227,13 +230,12 @@ def test_prometheus_api_error(client):
     with patch("requests.get") as mock_get:
         mock_response = MagicMock()
         mock_response.json.return_value = error_response
-        mock_response.status_code = 200
+        mock_response.content = str(error_response)
+        mock_response.status_code = 400
         mock_response.raise_for_status.return_value = None
         mock_get.return_value = mock_response
 
-        with pytest.raises(
-            PrometheusError, match="Prometheus API error: Invalid query"
-        ):
+        with pytest.raises(HTTPError, match="Invalid query"):
             client.list_metrics()
 
 
